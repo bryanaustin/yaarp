@@ -21,7 +21,7 @@ func TestGeneral(t *testing.T) {
 	aflag := ffs.Bool("a", false, "what's this story of?")
 	bflag := ffs.Bool("b", false, "bees")
 	isflag := ffs.Bool("is", false, "what is this?")
-	yfs := &FlagSet{FlagSet:ffs}
+	yfs := &FlagSet{FlagSet: ffs}
 	yfs.Parse([]string{"-th=is", "--is", "the", "--story", "of", "-a", "girl"})
 
 	if yfs.NArg() != 2 {

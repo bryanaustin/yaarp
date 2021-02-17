@@ -11,7 +11,7 @@ import (
 type FlagSet struct {
 	*flag.FlagSet
 	parsed bool
-	args []string
+	args   []string
 }
 
 type BoolFlagValue interface {
@@ -20,19 +20,19 @@ type BoolFlagValue interface {
 }
 
 const (
-	stateA1 = iota
-	stateA2
-	stateB
-	stateC0
-	stateC1
-	stateD
-	stateE
-	stateF
+	stateDefault = iota
+	stateBufArgument
+	stateOptionStart
+	stateDoubleDash
+	stateLongOption
+	stateShortOptions
+	stateValueExpected
+	stateArgumentOnly
 )
 
 // CommandLine is the default set of command-line flags, parsed from os.Args.
 var CommandLine = &FlagSet{
-	FlagSet:flag.CommandLine,
+	FlagSet: flag.CommandLine,
 }
 
 // Parsed reports whether f.Parse has been called.
@@ -128,84 +128,94 @@ func (f *FlagSet) Parse(arguments []string) error {
 		// }
 
 		switch state {
-		case stateA1:
+
+		// Anything could happen next!
+		case stateDefault:
 			if focus == '-' {
-				state = stateB // likely an option or options
+				state = stateOptionStart
 			} else if !seperator {
 				buffer.WriteRune(focus)
-				state = stateA2 // this is an argument
+				state = stateBufArgument
 			}
-		
-		case stateA2:
+
+		// Reciving an argument (not an option), keep buffering
+		// until we come across a seperator
+		case stateBufArgument:
 			if seperator {
 				f.args = append(f.args, buffer.String())
 				buffer.Reset()
-				state = stateA1 // argument captured, return to defualt state
+				state = stateDefault // argument captured, return to defualt state
 			} else {
 				buffer.WriteRune(focus)
 			}
 
-		case stateB:
+		// This will probably be an option. There are other situations were it
+		// not be, but it probably is.
+		case stateOptionStart:
 			if seperator {
 				f.args = append(f.args, string(focus))
-				state = stateA1 // add a -, return to default state
+				state = stateDefault // add a -, return to default state
 			} else if focus == '-' {
-				state = stateC0
+				state = stateDoubleDash
 			} else {
 				buffer.WriteRune(focus)
-				state = stateD
+				state = stateShortOptions
 			}
 
-		case stateC0:
+		// Two dashes happened, is it going to be a long option?
+		case stateDoubleDash:
 			if seperator {
-				state = stateF
+				state = stateArgumentOnly
 			} else {
 				buffer.WriteRune(focus)
-				state = stateC1
+				state = stateLongOption
 			}
 
-		case stateC1:
+		// Long option
+		case stateLongOption:
 			if seperator {
 				option = buffer.String()
 				buffer.Reset()
 				if trySetBool() {
-					state = stateA1
+					state = stateDefault
 				} else {
-					state = stateE
+					state = stateValueExpected
 				}
 			} else if focus == '=' {
 				option = buffer.String()
 				buffer.Reset()
-				state = stateE
+				state = stateValueExpected
 			} else {
 				buffer.WriteRune(focus)
 			}
 
-		case stateD:
+		// Single letter options/flags
+		case stateShortOptions:
 			option = buffer.String()
 			buffer.Reset()
 			if focus == '=' {
-				state = stateE
+				state = stateValueExpected
 			} else {
 				if !trySetBool() {
 					if seperator {
-						state = stateE
+						state = stateValueExpected
 					} else {
 						// ERROR case
 					}
 				} else if seperator {
-					state = stateA1
+					state = stateDefault
 				} else {
 					buffer.WriteRune(focus)
 				}
 			}
 
-		case stateE:
+		// Option name has been buffered, expecting a vlaue.
+		case stateValueExpected:
 			if seperator {
 				if fo := f.FlagSet.Lookup(option); fo != nil {
 					fo.Value.Set(buffer.String())
 					buffer.Reset()
-					state = stateA1
+					state = stateDefault
 				} else {
 					// ERROR
 				}
@@ -213,7 +223,8 @@ func (f *FlagSet) Parse(arguments []string) error {
 				buffer.WriteRune(focus)
 			}
 
-		case stateF:
+		// No more options, arguments only
+		case stateArgumentOnly:
 			if seperator {
 				f.args = append(f.args, buffer.String())
 				buffer.Reset()
