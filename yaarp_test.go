@@ -5,14 +5,9 @@ import (
 	"testing"
 )
 
-// // TestArgsToArray is a general test of the FlagSet.argsToArray function
-// func TestArgsToArray(t *testing.T) {
-// 	t.Parallel()
-
-// }
-
 // TestGeneral will test basic functionlity
 func TestGeneral(t *testing.T) {
+	t.Parallel()
 	ffs := flag.NewFlagSet("test", flag.PanicOnError)
 	storyval := ffs.String("story", "for", "the purpose of the story")
 	tubaval := ffs.String("tuba", "brump", "this is a tuba")
@@ -22,7 +17,10 @@ func TestGeneral(t *testing.T) {
 	bflag := ffs.Bool("b", false, "bees")
 	isflag := ffs.Bool("is", false, "what is this?")
 	yfs := &FlagSet{FlagSet: ffs}
-	yfs.Parse([]string{"-th=is", "--is", "the", "--story", "of", "-a", "girl"})
+
+	if err := yfs.Parse([]string{"-th=is", "--is", "the", "--story", "of", "-a", "girl"}); err != nil {
+		t.Fatalf("Expected parse to run without error, got: %s", err)
+	}
 
 	if yfs.NArg() != 2 {
 		t.Fatalf("Expected to have 2 argments, got %d", yfs.NArg())

@@ -1,10 +1,11 @@
 package yaarp
 
 import (
+	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"strings"
-	// "fmt"
 )
 
 // FlagSet is the yaarp wrapper for parinsg flags.
@@ -28,6 +29,11 @@ const (
 	stateShortOptions
 	stateValueExpected
 	stateArgumentOnly
+)
+
+var (
+	ErrOptionNotFlag  = errors.New("used as a flag when it expects a value")
+	ErrOptionNotFound = errors.New("option not found")
 )
 
 // CommandLine is the default set of command-line flags, parsed from os.Args.
@@ -88,18 +94,13 @@ func Args() []string { return CommandLine.args }
 // The return value will be ErrHelp if -help or -h were set but not defined.
 func (f *FlagSet) Parse(arguments []string) error {
 	var state, i1, i2 int
-	// i2 := -1
 	var option string
 	buffer := &strings.Builder{}
 
-	trySetBool := func() (valueset bool) {
-		if fo := f.FlagSet.Lookup(option); fo != nil {
-			if bv, ok := fo.Value.(BoolFlagValue); ok && bv.IsBoolFlag() {
-				bv.Set("true")
-				valueset = true
-			}
-		} else {
-			//ERROR
+	trySetBool := func(fo *flag.Flag) (valueset bool) {
+		if bv, ok := fo.Value.(BoolFlagValue); ok && bv.IsBoolFlag() {
+			bv.Set("true")
+			valueset = true
 		}
 		return
 	}
@@ -176,7 +177,13 @@ func (f *FlagSet) Parse(arguments []string) error {
 			if seperator {
 				option = buffer.String()
 				buffer.Reset()
-				if trySetBool() {
+				fo := f.FlagSet.Lookup(option)
+
+				if fo == nil {
+					return fmt.Errorf("option %q: %w", option, ErrOptionNotFound)
+				}
+
+				if trySetBool(fo) {
 					state = stateDefault
 				} else {
 					state = stateValueExpected
@@ -196,11 +203,16 @@ func (f *FlagSet) Parse(arguments []string) error {
 			if focus == '=' {
 				state = stateValueExpected
 			} else {
-				if !trySetBool() {
+				fo := f.FlagSet.Lookup(option)
+				if fo == nil {
+					return fmt.Errorf("option %q: %w", option, ErrOptionNotFound)
+				}
+
+				if !trySetBool(fo) {
 					if seperator {
 						state = stateValueExpected
 					} else {
-						// ERROR case
+						return fmt.Errorf("option %q: %w", option, ErrOptionNotFlag)
 					}
 				} else if seperator {
 					state = stateDefault
@@ -217,7 +229,7 @@ func (f *FlagSet) Parse(arguments []string) error {
 					buffer.Reset()
 					state = stateDefault
 				} else {
-					// ERROR
+					return fmt.Errorf("option %q: %w", option, ErrOptionNotFound)
 				}
 			} else {
 				buffer.WriteRune(focus)
