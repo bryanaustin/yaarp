@@ -1,14 +1,17 @@
 package yaarp
 
 import (
+	"bytes"
 	"flag"
+	"io"
+	"io/ioutil"
 	"testing"
 )
 
 // TestGeneral will test basic functionlity
 func TestGeneral(t *testing.T) {
 	t.Parallel()
-	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
 	storyval := ffs.String("story", "for", "the purpose of the story")
 	tubaval := ffs.String("tuba", "brump", "this is a tuba")
 	hval := ffs.String("h", "q", "what about the story")
@@ -23,7 +26,7 @@ func TestGeneral(t *testing.T) {
 	}
 
 	if yfs.NArg() != 2 {
-		t.Fatalf("Expected to have 2 argments, got %d", yfs.NArg())
+		t.Fatalf("Expected to have 2 arguments, got %d", yfs.NArg())
 	}
 
 	stringEquality(t, "the", yfs.Arg(0))
@@ -46,6 +49,58 @@ func TestGeneral(t *testing.T) {
 
 	if !*isflag {
 		t.Error("Expected isflag to be true, it wasn't")
+	}
+}
+
+// TestDashes will test - and -- arguments
+func TestDashes(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	outval := ffs.String("o", "q", "output")
+	yfs := &FlagSet{FlagSet: ffs}
+
+	yfs.Parse([]string{"-", "-o", "-", "--", "-o", "-"})
+
+	if yfs.NArg() != 3 {
+		t.Fatalf("Expected to have 3 arguments, got %d", yfs.NArg())
+	}
+
+	stringEquality(t, "-", yfs.Arg(0))
+	stringEquality(t, "-o", yfs.Arg(1))
+	stringEquality(t, "-", yfs.Arg(2))
+	stringEquality(t, "-", *outval)
+}
+
+// TestHelpSingle will test that the help dialog shows up with -h
+func TestHelpSingle(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.SetOutput(ioutil.Discard)
+	yfs := &FlagSet{FlagSet: ffs}
+	if err := yfs.Parse([]string{"-h", "help!"}); err != flag.ErrHelp {
+		t.Error("Expected to get the help error. Did not.")
+	}
+}
+
+// TestHelpLong will test that the help dialog shows up with --help
+func TestHelpLong(t *testing.T) {
+	t.Parallel()
+	outbuf := new(bytes.Buffer)
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.Bool("a", false, "is for apple")
+	yfs := &FlagSet{FlagSet: ffs}
+	ffs.SetOutput(outbuf)
+
+	if err := yfs.Parse([]string{"--help"}); err != flag.ErrHelp {
+		t.Error("Expected to get the help error. Did not.")
+	}
+
+	line, err := outbuf.ReadString('\x00')
+	if err != io.EOF {
+		t.Fatalf("Expected no error when reading from help buffer, got: %s", err)
+	}
+	if line != "Usage of test:\n  -a\tis for apple\n" {
+		t.Errorf("Expected to get a specific output from help output, got: %q", line)
 	}
 }
 
