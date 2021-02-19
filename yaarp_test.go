@@ -109,12 +109,24 @@ func TestUnicode(t *testing.T) {
 	t.Parallel()
 	ffs := flag.NewFlagSet("test", flag.PanicOnError)
 	smiles := ffs.Bool("☺", false, "☺")
- 	yfs := &FlagSet{FlagSet: ffs}
- 	yfs.Parse([]string{"-☺"})
+	yfs := &FlagSet{FlagSet: ffs}
+	yfs.Parse([]string{"-☺"})
 
- 	if !*smiles {
+	if !*smiles {
 		t.Fatal("Expected to have ☺, got ☹")
- 	}
+	}
+}
+
+// TestNoArgs will test that everything doesn't break if no args are passed
+func TestNoArgs(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	yfs := &FlagSet{FlagSet: ffs}
+	yfs.Parse([]string{})
+
+	if yfs.NArg() != 0 {
+		t.Fatalf("Expected to have 0 arguments, got %d", yfs.NArg())
+	}
 }
 
 func stringEquality(t *testing.T, expected, gotten string) {

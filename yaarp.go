@@ -129,6 +129,10 @@ func (f *FlagSet) Parse(arguments []string) error {
 }
 
 func (f *FlagSet) parseInternal(arguments []string) error {
+	if len(arguments) < 1 {
+		return nil
+	}
+
 	var state, i1, i2 int
 	var option string
 	buffer := &strings.Builder{}
