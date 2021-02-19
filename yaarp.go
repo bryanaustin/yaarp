@@ -144,18 +144,22 @@ func (f *FlagSet) parseInternal(arguments []string) error {
 	for ; ; i2++ {
 		var seperator bool
 		var focus rune
+		var runeArgs []rune
 
-		if i2 == len(arguments[i1]) {
+		runeArgs = []rune(arguments[i1])
+
+		if i2 == len(runeArgs) {
 			seperator = true
 		} else {
-			if i2 > len(arguments[i1]) {
+			if i2 > len(runeArgs) {
 				i1++
 				if i1 >= len(arguments) {
 					break
 				}
 				i2 = 0
 			}
-			focus = []rune(arguments[i1])[i2]
+			runeArgs = []rune(arguments[i1])
+			focus = runeArgs[i2]
 		}
 
 		// if seperator {

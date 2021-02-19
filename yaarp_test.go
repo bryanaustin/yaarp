@@ -104,6 +104,19 @@ func TestHelpLong(t *testing.T) {
 	}
 }
 
+// TestUnicode will test may claims about unicode options
+func TestUnicode(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	smiles := ffs.Bool("☺", false, "☺")
+ 	yfs := &FlagSet{FlagSet: ffs}
+ 	yfs.Parse([]string{"-☺"})
+
+ 	if !*smiles {
+		t.Fatal("Expected to have ☺, got ☹")
+ 	}
+}
+
 func stringEquality(t *testing.T, expected, gotten string) {
 	t.Helper()
 	if expected != gotten {
