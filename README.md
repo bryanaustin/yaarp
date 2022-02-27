@@ -1,4 +1,6 @@
-# YAARP (Yet Another ARgument Parser) [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/bryanaustin/yaarp)
+# YAARP (Yet Another ARgument Parser)
+[![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/bryanaustin/yaarp)
+
 This argument parser seeks to support more [getopt](https://en.wikipedia.org/wiki/Getopt)-like syntax and to be lightweight. Using as much of the `flag` library as possible.
 
 ## Usage
@@ -12,6 +14,8 @@ import (
 )
 
 func main() {
+	count := new(int)
+	flag.IntVar("n", count, 1, "count") 
 	vflag := flag.Bool("v", false, "verbose")
 	format := flag.String("format", "long", "output format")
 	yaarp.Parse()
@@ -39,7 +43,7 @@ yaarp.Parse()
 arguments := yaarp.Args()
 ```
 ```bash
-program - -so - one --color -- two --three
+program - -so - brovo --color -- charlie --delta
 ```
 Argument/Option | Value
 --------------- | -----
@@ -47,6 +51,6 @@ silent          | true
 color           | true
 output          | -
 arguments[0]    | -
-arguments[1]    | one
-arguments[2]    | two
-arguments[3]    | --three
+arguments[1]    | brovo
+arguments[2]    | charlie
+arguments[3]    | --delta
