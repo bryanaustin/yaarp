@@ -120,6 +120,7 @@ func (f *FlagSet) Parse(arguments []string) error {
 		if err == flag.ErrHelp {
 			os.Exit(0)
 		}
+		fmt.Fprintf(f.FlagSet.Output(), "Error parsing args: %s\n", err)
 		os.Exit(2)
 	case flag.PanicOnError:
 		panic(err)
@@ -165,12 +166,6 @@ func (f *FlagSet) parseInternal(arguments []string) error {
 			runeArgs = []rune(arguments[i1])
 			focus = runeArgs[i2]
 		}
-
-		// if seperator {
-		// 	fmt.Println(fmt.Sprintf("%d separator", state))
-		// } else {
-		// 	fmt.Println(fmt.Sprintf("%d %q", state, focus))
-		// }
 
 		switch state {
 

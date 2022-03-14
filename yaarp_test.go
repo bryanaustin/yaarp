@@ -129,6 +129,17 @@ func TestNoArgs(t *testing.T) {
 	}
 }
 
+// TestQuotesInArg will test an option with a value that has quotes
+func TestQuotesInArg(t *testing.T) {
+	t.Parallel()
+	expected := `{"name":{"first":"bob"}}`
+	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	gotten := ffs.String("json", "{}", "json")
+	yfs := &FlagSet{FlagSet: ffs}
+	yfs.Parse([]string{"--json", expected})
+	stringEquality(t, expected, *gotten)
+}
+
 func stringEquality(t *testing.T, expected, gotten string) {
 	t.Helper()
 	if expected != gotten {
