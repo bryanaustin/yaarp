@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"flag"
 	"io"
-	"io/ioutil"
 	"testing"
 )
 
@@ -75,7 +74,7 @@ func TestDashes(t *testing.T) {
 func TestHelpSingle(t *testing.T) {
 	t.Parallel()
 	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
-	ffs.SetOutput(ioutil.Discard)
+	ffs.SetOutput(io.Discard)
 	yfs := &FlagSet{FlagSet: ffs}
 	if err := yfs.Parse([]string{"-h", "help!"}); err != flag.ErrHelp {
 		t.Error("Expected to get the help error. Did not.")
@@ -129,6 +128,18 @@ func TestNoArgs(t *testing.T) {
 	}
 }
 
+// TestEmptyArg will test that everything doesn't break if no args are passed
+func TestEmptyArg(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	yfs := &FlagSet{FlagSet: ffs}
+	yfs.Parse([]string{""})
+
+	if yfs.NArg() != 0 {
+		t.Fatalf("Expected to have 0 arguments, got %d", yfs.NArg())
+	}
+}
+
 // TestQuotesInArg will test an option with a value that has quotes
 func TestQuotesInArg(t *testing.T) {
 	t.Parallel()
@@ -138,6 +149,44 @@ func TestQuotesInArg(t *testing.T) {
 	yfs := &FlagSet{FlagSet: ffs}
 	yfs.Parse([]string{"--json", expected})
 	stringEquality(t, expected, *gotten)
+
+	if yfs.NArg() != 0 {
+		t.Fatalf("Expected to have 0 arguments, got %d", yfs.NArg())
+	}
+}
+
+// TestEmptyNonFirst will test what happens when there is an empty non-first arg
+func TestEmptyNonFirst(t *testing.T) {
+	t.Parallel()
+	expected := "%"
+	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	gotten := ffs.String("val", "", "value")
+	yfs := &FlagSet{FlagSet: ffs}
+	yfs.Parse([]string{"--val", expected, ""})
+	stringEquality(t, expected, *gotten)
+
+	if yfs.NArg() != 0 {
+		t.Fatalf("Expected to have 0 arguments, got %d", yfs.NArg())
+	}
+}
+
+// TestEmptyNonFirstNotLast will test what happens when there is something after a non-first empty arg
+func TestEmptyNonFirstNotLast(t *testing.T) {
+	t.Parallel()
+	expected := "%"
+	expectedArg := "words"
+	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	gotten := ffs.String("val", "", "value")
+	yfs := &FlagSet{FlagSet: ffs}
+	yfs.Parse([]string{"--val", expected, "", expectedArg})
+	stringEquality(t, expected, *gotten)
+
+	if yfs.NArg() != 1 {
+		t.Fatalf("Expected to have 1 argument, got %d", yfs.NArg())
+	}
+	if yfs.Arg(0) != expectedArg {
+		t.Errorf("Expected argument %q, got: %q", expectedArg, yfs.Arg(0))
+	}
 }
 
 func stringEquality(t *testing.T, expected, gotten string) {

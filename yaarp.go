@@ -157,8 +157,14 @@ func (f *FlagSet) parseInternal(arguments []string) error {
 			seperator = true
 		} else {
 			if i2 > len(runeArgs) {
-				i1++
-				if i1 >= len(arguments) {
+				var cancontinue bool
+				for i1++; i1 < len(arguments); i1++ {
+					if len(arguments[i1]) > 0 {
+						cancontinue = true
+						break
+					}
+				}
+				if !cancontinue {
 					break
 				}
 				i2 = 0
