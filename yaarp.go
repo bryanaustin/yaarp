@@ -21,17 +21,6 @@ type BoolFlagValue interface {
 	IsBoolFlag() bool
 }
 
-const (
-	stateDefault = iota
-	stateBufArgument
-	stateOptionStart
-	stateDoubleDash
-	stateLongOption
-	stateShortOptions
-	stateValueExpected
-	stateArgumentOnly
-)
-
 var (
 	ErrOptionNotFlag  = errors.New("used as a flag when it expects a value")
 	ErrOptionNotFound = errors.New("option not found")
@@ -130,172 +119,127 @@ func (f *FlagSet) Parse(arguments []string) error {
 }
 
 func (f *FlagSet) parseInternal(arguments []string) error {
-	if len(arguments) < 1 {
-		return nil
-	}
-
-	var state, i1, i2 int
-	var option string
-	buffer := &strings.Builder{}
-
-	trySetBool := func(fo *flag.Flag) (valueset bool) {
-		if bv, ok := fo.Value.(BoolFlagValue); ok && bv.IsBoolFlag() {
-			bv.Set("true")
-			valueset = true
+	for i := 0; i < len(arguments); i++ {
+		arg := arguments[i]
+		if arg == "" {
+			continue
 		}
-		return
-	}
-
-	for ; ; i2++ {
-		var seperator bool
-		var focus rune
-		var runeArgs []rune
-
-		runeArgs = []rune(arguments[i1])
-
-		if i2 == len(runeArgs) {
-			seperator = true
-		} else {
-			if i2 > len(runeArgs) {
-				var cancontinue bool
-				for i1++; i1 < len(arguments); i1++ {
-					if len(arguments[i1]) > 0 {
-						cancontinue = true
-						break
-					}
-				}
-				if !cancontinue {
-					break
-				}
-				i2 = 0
-			}
-			runeArgs = []rune(arguments[i1])
-			focus = runeArgs[i2]
+		if arg == "--" {
+			f.args = append(f.args, arguments[i+1:]...)
+			return nil
 		}
-
-		switch state {
-
-		// Anything could happen next!
-		case stateDefault:
-			if focus == '-' {
-				state = stateOptionStart
-			} else if !seperator {
-				buffer.WriteRune(focus)
-				state = stateBufArgument
-			}
-
-		// Receiving an argument (not an option), keep buffering
-		// until we come across a separator
-		case stateBufArgument:
-			if seperator {
-				f.args = append(f.args, buffer.String())
-				buffer.Reset()
-				state = stateDefault // argument captured, return to default state
-			} else {
-				buffer.WriteRune(focus)
-			}
-
-		// This will probably be an option. There are other situations were it
-		// not be, but it probably is.
-		case stateOptionStart:
-			if seperator {
-				f.args = append(f.args, "-")
-				state = stateDefault // add a -, return to default state
-			} else if focus == '-' {
-				state = stateDoubleDash
-			} else {
-				buffer.WriteRune(focus)
-				state = stateShortOptions
-			}
-
-		// Two dashes happened, is it going to be a long option?
-		case stateDoubleDash:
-			if seperator {
-				state = stateArgumentOnly
-			} else {
-				buffer.WriteRune(focus)
-				state = stateLongOption
-			}
-
-		// Long option
-		case stateLongOption:
-			if seperator {
-				option = buffer.String()
-				buffer.Reset()
-				fo := f.FlagSet.Lookup(option)
-
-				if fo == nil {
-					if option == "help" {
-						return flag.ErrHelp
-					}
-					return fmt.Errorf("option %q: %w", option, ErrOptionNotFound)
-				}
-
-				if trySetBool(fo) {
-					state = stateDefault
-				} else {
-					state = stateValueExpected
-				}
-			} else if focus == '=' {
-				option = buffer.String()
-				buffer.Reset()
-				state = stateValueExpected
-			} else {
-				buffer.WriteRune(focus)
-			}
-
-		// Single letter options/flags
-		case stateShortOptions:
-			option = buffer.String()
-			buffer.Reset()
-			if focus == '=' {
-				state = stateValueExpected
-			} else {
-				fo := f.FlagSet.Lookup(option)
-				if fo == nil {
-					if option == "h" {
-						return flag.ErrHelp
-					}
-					return fmt.Errorf("option %q: %w", option, ErrOptionNotFound)
-				}
-
-				if !trySetBool(fo) {
-					if seperator {
-						state = stateValueExpected
-					} else {
-						return fmt.Errorf("option %q: %w", option, ErrOptionNotFlag)
-					}
-				} else if seperator {
-					state = stateDefault
-				} else {
-					buffer.WriteRune(focus)
-				}
-			}
-
-		// Option name has been buffered, expecting a value.
-		case stateValueExpected:
-			if seperator {
-				if fo := f.FlagSet.Lookup(option); fo != nil {
-					fo.Value.Set(buffer.String())
-					buffer.Reset()
-					state = stateDefault
-				} else {
-					return fmt.Errorf("option %q: %w", option, ErrOptionNotFound)
-				}
-			} else {
-				buffer.WriteRune(focus)
-			}
-
-		// No more options, arguments only
-		case stateArgumentOnly:
-			if seperator {
-				f.args = append(f.args, buffer.String())
-				buffer.Reset()
-			} else {
-				buffer.WriteRune(focus)
-			}
+		if arg == "-" || arg[0] != '-' {
+			f.args = append(f.args, arg)
+			continue
 		}
+		if strings.HasPrefix(arg, "--") {
+			consumed, err := f.parseLongOption(arg[2:], arguments[i+1:])
+			if err != nil {
+				return err
+			}
+			i += consumed
+			continue
+		}
+		consumed, err := f.parseShortOptions(arg[1:], arguments[i+1:])
+		if err != nil {
+			return err
+		}
+		i += consumed
 	}
-
 	return nil
+}
+
+func (f *FlagSet) parseLongOption(body string, rest []string) (int, error) {
+	name, value, hasEq := splitOnEquals(body)
+	fo := f.FlagSet.Lookup(name)
+	if fo == nil {
+		if name == "help" && !hasEq {
+			return 0, flag.ErrHelp
+		}
+		return 0, fmt.Errorf("option %q: %w", name, ErrOptionNotFound)
+	}
+	if hasEq {
+		fo.Value.Set(value)
+		return 0, nil
+	}
+	if isBoolFlag(fo) {
+		fo.Value.Set("true")
+		return 0, nil
+	}
+	return consumeNextValue(fo, rest)
+}
+
+func (f *FlagSet) parseShortOptions(body string, rest []string) (int, error) {
+	flagBody := body
+	attachedValue := ""
+	hasEq := false
+	if eq := strings.IndexByte(body, '='); eq >= 0 {
+		flagBody = body[:eq]
+		attachedValue = body[eq+1:]
+		hasEq = true
+	}
+
+	runes := []rune(flagBody)
+	if len(runes) == 0 {
+		return 0, fmt.Errorf("option %q: %w", "", ErrOptionNotFound)
+	}
+
+	for _, r := range runes[:len(runes)-1] {
+		name := string(r)
+		fo := f.FlagSet.Lookup(name)
+		if fo == nil {
+			if name == "h" {
+				return 0, flag.ErrHelp
+			}
+			return 0, fmt.Errorf("option %q: %w", name, ErrOptionNotFound)
+		}
+		if !isBoolFlag(fo) {
+			return 0, fmt.Errorf("option %q: %w", name, ErrOptionNotFlag)
+		}
+		fo.Value.Set("true")
+	}
+
+	last := string(runes[len(runes)-1])
+	fo := f.FlagSet.Lookup(last)
+	if fo == nil {
+		if last == "h" && !hasEq {
+			return 0, flag.ErrHelp
+		}
+		return 0, fmt.Errorf("option %q: %w", last, ErrOptionNotFound)
+	}
+	if hasEq {
+		fo.Value.Set(attachedValue)
+		return 0, nil
+	}
+	if isBoolFlag(fo) {
+		fo.Value.Set("true")
+		return 0, nil
+	}
+	return consumeNextValue(fo, rest)
+}
+
+// consumeNextValue sets fo to the first non-empty element of rest, returning
+// how many of rest's leading elements were consumed (skipped empties + 1).
+// Empty input returns len(rest), 0 — matches the original silent-failure
+// behavior when a value-expecting flag has no value available.
+func consumeNextValue(fo *flag.Flag, rest []string) (int, error) {
+	for j, a := range rest {
+		if a != "" {
+			fo.Value.Set(a)
+			return j + 1, nil
+		}
+	}
+	return len(rest), nil
+}
+
+func splitOnEquals(s string) (name, value string, hasEq bool) {
+	if i := strings.IndexByte(s, '='); i >= 0 {
+		return s[:i], s[i+1:], true
+	}
+	return s, "", false
+}
+
+func isBoolFlag(fo *flag.Flag) bool {
+	bv, ok := fo.Value.(BoolFlagValue)
+	return ok && bv.IsBoolFlag()
 }
