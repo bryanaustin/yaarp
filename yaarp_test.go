@@ -2,6 +2,7 @@ package yaarp
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"io"
 	"testing"
@@ -193,5 +194,127 @@ func stringEquality(t *testing.T, expected, gotten string) {
 	t.Helper()
 	if expected != gotten {
 		t.Errorf("Expcted %q, got %q", expected, gotten)
+	}
+}
+
+// TestClusterBoolValueNextToken tests that a clustered short flag like -tv with t bool
+// and v non-bool consumes the next token as v's value.
+func TestClusterBoolValueNextToken(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	tflag := ffs.Bool("t", false, "t")
+	vval := ffs.String("v", "", "v")
+	yfs := &FlagSet{FlagSet: ffs}
+	yfs.Parse([]string{"-tv", "value"})
+
+	if !*tflag {
+		t.Error("Expected tflag to be true, it wasn't")
+	}
+	stringEquality(t, "value", *vval)
+	if yfs.NArg() != 0 {
+		t.Fatalf("Expected to have 0 arguments, got %d", yfs.NArg())
+	}
+}
+
+// TestClusterAllBool tests that a clustered short flag of all bool flags sets each true.
+func TestClusterAllBool(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	tflag := ffs.Bool("t", false, "t")
+	aflag := ffs.Bool("a", false, "a")
+	bflag := ffs.Bool("b", false, "b")
+	yfs := &FlagSet{FlagSet: ffs}
+	yfs.Parse([]string{"-tab"})
+
+	if !*tflag {
+		t.Error("Expected tflag to be true, it wasn't")
+	}
+	if !*aflag {
+		t.Error("Expected aflag to be true, it wasn't")
+	}
+	if !*bflag {
+		t.Error("Expected bflag to be true, it wasn't")
+	}
+	if yfs.NArg() != 0 {
+		t.Fatalf("Expected to have 0 arguments, got %d", yfs.NArg())
+	}
+}
+
+// TestErrOptionNotFlag tests that a clustered short flag with a non-bool option
+// followed by more characters in the same token returns ErrOptionNotFlag.
+func TestErrOptionNotFlag(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.Bool("a", false, "a")
+	ffs.String("v", "", "v")
+	yfs := &FlagSet{FlagSet: ffs}
+	err := yfs.Parse([]string{"-avx"})
+	if !errors.Is(err, ErrOptionNotFlag) {
+		t.Errorf("Expected error to wrap ErrOptionNotFlag, got: %v", err)
+	}
+}
+
+// TestUnknownLongOption tests that an undefined long option returns ErrOptionNotFound.
+func TestUnknownLongOption(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	yfs := &FlagSet{FlagSet: ffs}
+	err := yfs.Parse([]string{"--unknown"})
+	if !errors.Is(err, ErrOptionNotFound) {
+		t.Errorf("Expected error to wrap ErrOptionNotFound, got: %v", err)
+	}
+}
+
+// TestUnknownShortOption tests that an undefined short option (other than -h) returns ErrOptionNotFound.
+func TestUnknownShortOption(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	yfs := &FlagSet{FlagSet: ffs}
+	err := yfs.Parse([]string{"-x"})
+	if !errors.Is(err, ErrOptionNotFound) {
+		t.Errorf("Expected error to wrap ErrOptionNotFound, got: %v", err)
+	}
+}
+
+// TestShortHelpDefinedAsFlag tests that when -h is defined as a real flag it is not intercepted as help.
+func TestShortHelpDefinedAsFlag(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	hflag := ffs.Bool("h", false, "help")
+	yfs := &FlagSet{FlagSet: ffs}
+	if err := yfs.Parse([]string{"-h"}); err != nil {
+		t.Fatalf("Expected parse to run without error, got: %s", err)
+	}
+	if !*hflag {
+		t.Error("Expected hflag to be true, it wasn't")
+	}
+}
+
+// TestLongHelpDefinedAsFlag tests that when --help is defined as a real flag it is not intercepted as help.
+func TestLongHelpDefinedAsFlag(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	helpflag := ffs.Bool("help", false, "help")
+	yfs := &FlagSet{FlagSet: ffs}
+	if err := yfs.Parse([]string{"--help"}); err != nil {
+		t.Fatalf("Expected parse to run without error, got: %s", err)
+	}
+	if !*helpflag {
+		t.Error("Expected helpflag to be true, it wasn't")
+	}
+}
+
+// TestDoubleDashAtEnd tests that a trailing -- with no following args terminates cleanly.
+func TestDoubleDashAtEnd(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.PanicOnError)
+	flagval := ffs.String("flag", "", "flag")
+	yfs := &FlagSet{FlagSet: ffs}
+	if err := yfs.Parse([]string{"--flag", "value", "--"}); err != nil {
+		t.Fatalf("Expected parse to run without error, got: %s", err)
+	}
+	stringEquality(t, "value", *flagval)
+	if yfs.NArg() != 0 {
+		t.Fatalf("Expected to have 0 arguments, got %d", yfs.NArg())
 	}
 }
