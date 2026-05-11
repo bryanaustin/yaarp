@@ -576,3 +576,130 @@ func TestDefaultUsageNoTabs(t *testing.T) {
 		t.Errorf("output should contain no tab characters; got: %q", outbuf.String())
 	}
 }
+
+// collectVisited drives a Visit-style iterator and returns the names in the order yielded.
+func collectVisited(visit func(func(*flag.Flag))) []string {
+	var names []string
+	visit(func(fo *flag.Flag) { names = append(names, fo.Name) })
+	return names
+}
+
+// TestVisitAllOrder confirms VisitAll yields every defined flag in lexicographical order.
+func TestVisitAllOrder(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.Bool("c", false, "c")
+	ffs.Bool("a", false, "a")
+	ffs.Bool("b", false, "b")
+	yfs := &FlagSet{FlagSet: ffs}
+	if got := strings.Join(collectVisited(yfs.VisitAll), ","); got != "a,b,c" {
+		t.Errorf("VisitAll order: got %q, want %q", got, "a,b,c")
+	}
+}
+
+// TestVisitOnlySetFlags confirms Visit yields only flags that have been set during
+// parsing, in lexicographical order.
+func TestVisitOnlySetFlags(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.Bool("a", false, "a")
+	ffs.String("b", "", "b")
+	ffs.Bool("c", false, "c")
+	yfs := &FlagSet{FlagSet: ffs}
+	if err := yfs.Parse([]string{"-a", "--b=x"}); err != nil {
+		t.Fatalf("Expected parse to run without error, got: %s", err)
+	}
+	if got := strings.Join(collectVisited(yfs.Visit), ","); got != "a,b" {
+		t.Errorf("Visit names: got %q, want %q", got, "a,b")
+	}
+}
+
+// TestVisitClusteredBool confirms each bool in a cluster like -tab is routed through
+// the FlagSet's Set tracking and appears in Visit.
+func TestVisitClusteredBool(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.Bool("t", false, "t")
+	ffs.Bool("a", false, "a")
+	ffs.Bool("b", false, "b")
+	yfs := &FlagSet{FlagSet: ffs}
+	if err := yfs.Parse([]string{"-tab"}); err != nil {
+		t.Fatalf("Expected parse to run without error, got: %s", err)
+	}
+	if got := strings.Join(collectVisited(yfs.Visit), ","); got != "a,b,t" {
+		t.Errorf("Visit names: got %q, want %q", got, "a,b,t")
+	}
+}
+
+// TestVisitConsumesNextToken confirms a flag whose value comes from the next token is
+// tracked in Visit, and the visited Flag reports the consumed value via Value.String().
+func TestVisitConsumesNextToken(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.String("v", "", "v")
+	yfs := &FlagSet{FlagSet: ffs}
+	if err := yfs.Parse([]string{"-v", "value"}); err != nil {
+		t.Fatalf("Expected parse to run without error, got: %s", err)
+	}
+	if got := strings.Join(collectVisited(yfs.Visit), ","); got != "v" {
+		t.Errorf("Visit names: got %q, want %q", got, "v")
+	}
+	yfs.Visit(func(fo *flag.Flag) {
+		stringEquality(t, "value", fo.Value.String())
+	})
+}
+
+// TestVisitBeforeParse confirms that before Parse runs, Visit yields nothing while
+// VisitAll still yields the defined flags.
+func TestVisitBeforeParse(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.Bool("a", false, "a")
+	yfs := &FlagSet{FlagSet: ffs}
+	if got := collectVisited(yfs.Visit); len(got) != 0 {
+		t.Errorf("Visit before Parse: got %v, want empty", got)
+	}
+	if got := strings.Join(collectVisited(yfs.VisitAll), ","); got != "a" {
+		t.Errorf("VisitAll before Parse: got %q, want %q", got, "a")
+	}
+}
+
+// TestVisitSkipsFailedSet confirms that when Value.Set fails (e.g., --flag= with an
+// empty value for a bool flag, which fails strconv.ParseBool), the flag is NOT recorded
+// as set, matching stdlib semantics. Parse itself still returns nil because Set errors
+// are silently dropped.
+func TestVisitSkipsFailedSet(t *testing.T) {
+	t.Parallel()
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.Bool("flag", false, "flag")
+	yfs := &FlagSet{FlagSet: ffs}
+	if err := yfs.Parse([]string{"--flag="}); err != nil {
+		t.Fatalf("Expected parse to run without error, got: %s", err)
+	}
+	if got := collectVisited(yfs.Visit); len(got) != 0 {
+		t.Errorf("Visit should be empty when Set failed; got %v", got)
+	}
+}
+
+// TestPackageLevelVisit confirms the package-level Visit and VisitAll functions
+// delegate to CommandLine and yield the same names as the FlagSet methods. Swaps
+// CommandLine for an isolated FlagSet and restores it on exit.
+func TestPackageLevelVisit(t *testing.T) {
+	saved := CommandLine
+	defer func() { CommandLine = saved }()
+
+	ffs := flag.NewFlagSet("p", flag.ContinueOnError)
+	ffs.Bool("a", false, "a")
+	ffs.String("b", "", "b")
+	CommandLine = &FlagSet{FlagSet: ffs}
+	if err := CommandLine.Parse([]string{"--b=x"}); err != nil {
+		t.Fatalf("Expected parse to run without error, got: %s", err)
+	}
+
+	if got := strings.Join(collectVisited(Visit), ","); got != "b" {
+		t.Errorf("package Visit: got %q, want %q", got, "b")
+	}
+	if got := strings.Join(collectVisited(VisitAll), ","); got != "a,b" {
+		t.Errorf("package VisitAll: got %q, want %q", got, "a,b")
+	}
+}

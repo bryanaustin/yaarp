@@ -79,7 +79,21 @@ func (f *FlagSet) Args() []string { return f.args }
 // Args returns the non-flag command-line arguments.
 func Args() []string { return CommandLine.args }
 
-// VisitAll not implemented. Does anyone use it?
+// Visit visits the flags in lexicographical order, calling fn for each.
+// It visits only those flags that have been set.
+func (f *FlagSet) Visit(fn func(*flag.Flag)) { f.FlagSet.Visit(fn) }
+
+// VisitAll visits the flags in lexicographical order, calling fn for each.
+// It visits all flags, even those not set.
+func (f *FlagSet) VisitAll(fn func(*flag.Flag)) { f.FlagSet.VisitAll(fn) }
+
+// Visit visits the command-line flags in lexicographical order, calling fn
+// for each. It visits only those flags that have been set.
+func Visit(fn func(*flag.Flag)) { CommandLine.Visit(fn) }
+
+// VisitAll visits the command-line flags in lexicographical order, calling
+// fn for each. It visits all flags, even those not set.
+func VisitAll(fn func(*flag.Flag)) { CommandLine.VisitAll(fn) }
 
 // Parse parses flag definitions from the argument list, which should not
 // include the command name. Must be called after all flags in the FlagSet
@@ -157,14 +171,14 @@ func (f *FlagSet) parseLongOption(body string, rest []string) (int, error) {
 		return 0, fmt.Errorf("option %q: %w", name, ErrOptionNotFound)
 	}
 	if hasEq {
-		fo.Value.Set(value)
+		_ = f.FlagSet.Set(name, value)
 		return 0, nil
 	}
 	if isBoolFlag(fo) {
-		fo.Value.Set("true")
+		_ = f.FlagSet.Set(name, "true")
 		return 0, nil
 	}
-	return consumeNextValue(fo, rest)
+	return consumeNextValue(f.FlagSet, name, rest)
 }
 
 func (f *FlagSet) parseShortOptions(body string, rest []string) (int, error) {
@@ -194,7 +208,7 @@ func (f *FlagSet) parseShortOptions(body string, rest []string) (int, error) {
 		if !isBoolFlag(fo) {
 			return 0, fmt.Errorf("option %q: %w", name, ErrOptionNotFlag)
 		}
-		fo.Value.Set("true")
+		_ = f.FlagSet.Set(name, "true")
 	}
 
 	last := string(runes[len(runes)-1])
@@ -206,24 +220,26 @@ func (f *FlagSet) parseShortOptions(body string, rest []string) (int, error) {
 		return 0, fmt.Errorf("option %q: %w", last, ErrOptionNotFound)
 	}
 	if hasEq {
-		fo.Value.Set(attachedValue)
+		_ = f.FlagSet.Set(last, attachedValue)
 		return 0, nil
 	}
 	if isBoolFlag(fo) {
-		fo.Value.Set("true")
+		_ = f.FlagSet.Set(last, "true")
 		return 0, nil
 	}
-	return consumeNextValue(fo, rest)
+	return consumeNextValue(f.FlagSet, last, rest)
 }
 
-// consumeNextValue sets fo to the first non-empty element of rest, returning
-// how many of rest's leading elements were consumed (skipped empties + 1).
-// Empty input returns len(rest), 0 — matches the original silent-failure
-// behavior when a value-expecting flag has no value available.
-func consumeNextValue(fo *flag.Flag, rest []string) (int, error) {
+// consumeNextValue sets the flag named name on fs to the first non-empty
+// element of rest, returning how many of rest's leading elements were
+// consumed (skipped empties + 1). Empty input returns len(rest), 0 —
+// matches the original silent-failure behavior when a value-expecting flag
+// has no value available. Set errors are silently dropped to preserve
+// bug-compat with the original parser.
+func consumeNextValue(fs *flag.FlagSet, name string, rest []string) (int, error) {
 	for j, a := range rest {
 		if a != "" {
-			fo.Value.Set(a)
+			_ = fs.Set(name, a)
 			return j + 1, nil
 		}
 	}
