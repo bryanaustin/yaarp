@@ -5,7 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"reflect"
+	"runtime"
 	"strings"
+	"unicode/utf8"
 )
 
 // FlagSet is the yaarp wrapper for parsing flags.
@@ -90,13 +93,8 @@ func (f *FlagSet) Parse(arguments []string) error {
 	}
 
 	if err == flag.ErrHelp {
-		if f.FlagSet.Usage == nil {
-			if f.FlagSet.Name() == "" {
-				fmt.Fprintf(f.FlagSet.Output(), "Usage:\n")
-			} else {
-				fmt.Fprintf(f.FlagSet.Output(), "Usage of %s:\n", f.FlagSet.Name())
-			}
-			f.FlagSet.PrintDefaults()
+		if isStdlibDefaultUsage(f.FlagSet.Usage) {
+			f.printDefaultUsage()
 		} else {
 			f.FlagSet.Usage()
 		}
@@ -242,4 +240,140 @@ func splitOnEquals(s string) (name, value string, hasEq bool) {
 func isBoolFlag(fo *flag.Flag) bool {
 	bv, ok := fo.Value.(BoolFlagValue)
 	return ok && bv.IsBoolFlag()
+}
+
+// usageFoldThreshold is the rune-width above which a flag row's description
+// folds onto the next line, preventing one outlier flag from shifting every
+// other description column far to the right.
+const usageFoldThreshold = 28
+
+// printDefaultUsage writes a GNU-style usage message when the user has not
+// supplied their own f.FlagSet.Usage. Output uses spaces (never tab
+// characters) and measures column widths in runes.
+func (f *FlagSet) printDefaultUsage() {
+	w := f.FlagSet.Output()
+	if name := f.FlagSet.Name(); name != "" {
+		fmt.Fprintf(w, "Usage: %s [OPTIONS] [ARGUMENTS]\n\n", name)
+	} else {
+		fmt.Fprint(w, "Usage: [OPTIONS] [ARGUMENTS]\n\n")
+	}
+	fmt.Fprint(w, "Options:\n")
+
+	type row struct {
+		syntax string
+		desc   string
+		width  int
+	}
+	var rows []row
+	f.FlagSet.VisitAll(func(fo *flag.Flag) {
+		s, d := formatFlagRow(fo)
+		rows = append(rows, row{s, d, utf8.RuneCountInString(s)})
+	})
+	if f.FlagSet.Lookup("h") == nil && f.FlagSet.Lookup("help") == nil {
+		s := "-h, --help"
+		rows = append(rows, row{s, "show this help and exit", utf8.RuneCountInString(s)})
+	}
+
+	const indent = 2
+	const gutter = 2
+	maxShortSyntax := 0
+	for _, r := range rows {
+		if r.width <= usageFoldThreshold && r.width > maxShortSyntax {
+			maxShortSyntax = r.width
+		}
+	}
+	indentStr := strings.Repeat(" ", indent)
+	foldDescIndent := strings.Repeat(" ", indent+maxShortSyntax+gutter)
+
+	for _, r := range rows {
+		if r.width <= usageFoldThreshold {
+			if r.desc == "" {
+				fmt.Fprintf(w, "%s%s\n", indentStr, r.syntax)
+				continue
+			}
+			pad := strings.Repeat(" ", maxShortSyntax-r.width+gutter)
+			fmt.Fprintf(w, "%s%s%s%s\n", indentStr, r.syntax, pad, r.desc)
+			continue
+		}
+		fmt.Fprintf(w, "%s%s\n", indentStr, r.syntax)
+		if r.desc != "" {
+			fmt.Fprintf(w, "%s%s\n", foldDescIndent, r.desc)
+		}
+	}
+}
+
+// formatFlagRow builds the syntax and description columns for a single flag.
+// The syntax column uses "-" for single-rune names and "--" for longer ones,
+// reflecting what yaarp actually accepts at the command line. The description
+// column joins the (un-quoted) usage text with a "(default ...)" suffix when
+// the flag has a meaningful non-zero default.
+func formatFlagRow(fo *flag.Flag) (syntax, description string) {
+	var prefix string
+	if len([]rune(fo.Name)) == 1 {
+		prefix = "-" + fo.Name
+	} else {
+		prefix = "--" + fo.Name
+	}
+	placeholder, usageText := flag.UnquoteUsage(fo)
+	if placeholder != "" {
+		syntax = prefix + " <" + placeholder + ">"
+	} else {
+		syntax = prefix
+	}
+
+	var defaultSuffix string
+	if isBoolFlag(fo) {
+		if fo.DefValue == "true" {
+			defaultSuffix = "(default true)"
+		}
+	} else if fo.DefValue != "" {
+		if isStringFlag(fo) {
+			defaultSuffix = fmt.Sprintf("(default %q)", fo.DefValue)
+		} else {
+			defaultSuffix = "(default " + fo.DefValue + ")"
+		}
+	}
+
+	switch {
+	case usageText == "" && defaultSuffix == "":
+		description = ""
+	case usageText == "":
+		description = defaultSuffix
+	case defaultSuffix == "":
+		description = usageText
+	default:
+		description = usageText + " " + defaultSuffix
+	}
+	return
+}
+
+// isStringFlag reports whether fo's underlying Value stores a string. This is
+// the right hook for "should the default be quoted?" because it sees through
+// the flag.Value interface to the concrete kind (e.g. stdlib's stringValue,
+// or a user-defined flag.Value whose backing is a string).
+func isStringFlag(fo *flag.Flag) bool {
+	v := reflect.ValueOf(fo.Value)
+	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return false
+		}
+		v = v.Elem()
+	}
+	return v.Kind() == reflect.String
+}
+
+// isStdlibDefaultUsage reports whether u is either nil or stdlib's
+// auto-installed (*flag.FlagSet).defaultUsage bound method value. flag.NewFlagSet
+// pre-populates Usage with that bound method, so a literal nil check is
+// insufficient to tell "user has not customized Usage" from "user has set a
+// real custom function".
+func isStdlibDefaultUsage(u func()) bool {
+	if u == nil {
+		return true
+	}
+	fp := runtime.FuncForPC(reflect.ValueOf(u).Pointer())
+	if fp == nil {
+		return false
+	}
+	return strings.Contains(fp.Name(), ".defaultUsage")
 }

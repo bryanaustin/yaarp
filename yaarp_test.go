@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -82,7 +83,8 @@ func TestHelpSingle(t *testing.T) {
 	}
 }
 
-// TestHelpLong will test that the help dialog shows up with --help
+// TestHelpLong will test that the help dialog shows up with --help and
+// renders in the new GNU-style default format.
 func TestHelpLong(t *testing.T) {
 	t.Parallel()
 	outbuf := new(bytes.Buffer)
@@ -95,12 +97,13 @@ func TestHelpLong(t *testing.T) {
 		t.Error("Expected to get the help error. Did not.")
 	}
 
-	line, err := outbuf.ReadString('\x00')
-	if err != io.EOF {
-		t.Fatalf("Expected no error when reading from help buffer, got: %s", err)
-	}
-	if line != "Usage of test:\n  -a\tis for apple\n" {
-		t.Errorf("Expected to get a specific output from help output, got: %q", line)
+	expected := "Usage: test [OPTIONS] [ARGUMENTS]\n" +
+		"\n" +
+		"Options:\n" +
+		"  -a" + strings.Repeat(" ", 10) + "is for apple\n" +
+		"  -h, --help  show this help and exit\n"
+	if got := outbuf.String(); got != expected {
+		t.Errorf("unexpected help output:\ngot:  %q\nwant: %q", got, expected)
 	}
 }
 
@@ -316,5 +319,260 @@ func TestDoubleDashAtEnd(t *testing.T) {
 	stringEquality(t, "value", *flagval)
 	if yfs.NArg() != 0 {
 		t.Fatalf("Expected to have 0 arguments, got %d", yfs.NArg())
+	}
+}
+
+// TestDefaultUsageMixed exercises the default usage with bool/string/int/backtick
+// flags, asserting synopsis, alignment, placeholders, and default-value formatting.
+func TestDefaultUsageMixed(t *testing.T) {
+	t.Parallel()
+	outbuf := new(bytes.Buffer)
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.Int("count", 5, "how many")
+	ffs.String("file", "main.go", "read from `FILE`")
+	ffs.String("output", "out.txt", "where to write")
+	ffs.Bool("v", false, "verbose mode")
+	yfs := &FlagSet{FlagSet: ffs}
+	ffs.SetOutput(outbuf)
+
+	if err := yfs.Parse([]string{"--help"}); err != flag.ErrHelp {
+		t.Fatalf("Expected ErrHelp, got: %v", err)
+	}
+
+	expected := "Usage: test [OPTIONS] [ARGUMENTS]\n" +
+		"\n" +
+		"Options:\n" +
+		"  --count <int>" + strings.Repeat(" ", 6) + "how many (default 5)\n" +
+		"  --file <FILE>" + strings.Repeat(" ", 6) + "read from FILE (default \"main.go\")\n" +
+		"  --output <string>  where to write (default \"out.txt\")\n" +
+		"  -v" + strings.Repeat(" ", 17) + "verbose mode\n" +
+		"  -h, --help" + strings.Repeat(" ", 9) + "show this help and exit\n"
+	if got := outbuf.String(); got != expected {
+		t.Errorf("unexpected help output:\ngot:  %q\nwant: %q", got, expected)
+	}
+}
+
+// TestDefaultUsageUserHelpSuppressesSynthetic confirms the synthetic
+// "-h, --help" row is not appended when the user defines either flag.
+func TestDefaultUsageUserHelpSuppressesSynthetic(t *testing.T) {
+	t.Parallel()
+
+	t.Run("user-defined -h", func(t *testing.T) {
+		outbuf := new(bytes.Buffer)
+		ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+		ffs.Bool("h", false, "user h flag")
+		yfs := &FlagSet{FlagSet: ffs}
+		ffs.SetOutput(outbuf)
+
+		if err := yfs.Parse([]string{"--help"}); err != flag.ErrHelp {
+			t.Fatalf("Expected ErrHelp, got: %v", err)
+		}
+
+		expected := "Usage: test [OPTIONS] [ARGUMENTS]\n" +
+			"\n" +
+			"Options:\n" +
+			"  -h  user h flag\n"
+		if got := outbuf.String(); got != expected {
+			t.Errorf("unexpected output:\ngot:  %q\nwant: %q", got, expected)
+		}
+		if strings.Contains(outbuf.String(), "--help") {
+			t.Errorf("synthetic --help row should be suppressed; got: %q", outbuf.String())
+		}
+	})
+
+	t.Run("user-defined --help", func(t *testing.T) {
+		outbuf := new(bytes.Buffer)
+		ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+		ffs.Bool("help", false, "user help flag")
+		yfs := &FlagSet{FlagSet: ffs}
+		ffs.SetOutput(outbuf)
+
+		if err := yfs.Parse([]string{"-h"}); err != flag.ErrHelp {
+			t.Fatalf("Expected ErrHelp, got: %v", err)
+		}
+
+		expected := "Usage: test [OPTIONS] [ARGUMENTS]\n" +
+			"\n" +
+			"Options:\n" +
+			"  --help  user help flag\n"
+		if got := outbuf.String(); got != expected {
+			t.Errorf("unexpected output:\ngot:  %q\nwant: %q", got, expected)
+		}
+	})
+}
+
+// TestDefaultUsageNoName confirms the synopsis omits the program name when
+// the FlagSet has an empty Name.
+func TestDefaultUsageNoName(t *testing.T) {
+	t.Parallel()
+	outbuf := new(bytes.Buffer)
+	ffs := flag.NewFlagSet("", flag.ContinueOnError)
+	yfs := &FlagSet{FlagSet: ffs}
+	ffs.SetOutput(outbuf)
+
+	if err := yfs.Parse([]string{"--help"}); err != flag.ErrHelp {
+		t.Fatalf("Expected ErrHelp, got: %v", err)
+	}
+
+	expected := "Usage: [OPTIONS] [ARGUMENTS]\n" +
+		"\n" +
+		"Options:\n" +
+		"  -h, --help  show this help and exit\n"
+	if got := outbuf.String(); got != expected {
+		t.Errorf("unexpected output:\ngot:  %q\nwant: %q", got, expected)
+	}
+}
+
+// TestDefaultUsageNoFlags confirms the synthetic help row appears even when
+// the FlagSet has no user-defined flags.
+func TestDefaultUsageNoFlags(t *testing.T) {
+	t.Parallel()
+	outbuf := new(bytes.Buffer)
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	yfs := &FlagSet{FlagSet: ffs}
+	ffs.SetOutput(outbuf)
+
+	if err := yfs.Parse([]string{"--help"}); err != flag.ErrHelp {
+		t.Fatalf("Expected ErrHelp, got: %v", err)
+	}
+
+	expected := "Usage: test [OPTIONS] [ARGUMENTS]\n" +
+		"\n" +
+		"Options:\n" +
+		"  -h, --help  show this help and exit\n"
+	if got := outbuf.String(); got != expected {
+		t.Errorf("unexpected output:\ngot:  %q\nwant: %q", got, expected)
+	}
+}
+
+// TestDefaultUsageFoldsLongSyntax confirms that a syntax cell exceeding the
+// fold threshold puts its description on the next line, while short rows
+// remain aligned to the description column anchored on the widest
+// short-row syntax.
+func TestDefaultUsageFoldsLongSyntax(t *testing.T) {
+	t.Parallel()
+	outbuf := new(bytes.Buffer)
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.Bool("a", false, "the a flag")
+	ffs.Bool("b", false, "the b flag")
+	ffs.String("really-long-config-name", "default.cfg", "load config")
+	yfs := &FlagSet{FlagSet: ffs}
+	ffs.SetOutput(outbuf)
+
+	if err := yfs.Parse([]string{"--help"}); err != flag.ErrHelp {
+		t.Fatalf("Expected ErrHelp, got: %v", err)
+	}
+
+	expected := "Usage: test [OPTIONS] [ARGUMENTS]\n" +
+		"\n" +
+		"Options:\n" +
+		"  -a" + strings.Repeat(" ", 10) + "the a flag\n" +
+		"  -b" + strings.Repeat(" ", 10) + "the b flag\n" +
+		"  --really-long-config-name <string>\n" +
+		strings.Repeat(" ", 14) + "load config (default \"default.cfg\")\n" +
+		"  -h, --help  show this help and exit\n"
+	if got := outbuf.String(); got != expected {
+		t.Errorf("unexpected output:\ngot:  %q\nwant: %q", got, expected)
+	}
+}
+
+// TestDefaultUsageAllFolded confirms that when every row exceeds the fold
+// threshold, folded descriptions land at column 4 (indent + 0 + gutter). It
+// suppresses the synthetic row by defining both -h and --help, and uses
+// backtick-named placeholders to force those user flags to fold as well.
+func TestDefaultUsageAllFolded(t *testing.T) {
+	t.Parallel()
+	outbuf := new(bytes.Buffer)
+	ffs := flag.NewFlagSet("tool", flag.ContinueOnError)
+	ffs.String("first-extremely-long-flag", "", "first one")
+	ffs.Int("second-extremely-long-flag", 10, "second one")
+	ffs.Bool("h", false, "user h `LONG_PLACEHOLDER_TO_FORCE_FOLDING_OF_H`")
+	ffs.Bool("help", false, "user help `LONG_PLACEHOLDER_TO_FORCE_FOLDING_OF_HELP`")
+	yfs := &FlagSet{FlagSet: ffs}
+	ffs.SetOutput(outbuf)
+	yfs.printDefaultUsage()
+
+	expected := "Usage: tool [OPTIONS] [ARGUMENTS]\n" +
+		"\n" +
+		"Options:\n" +
+		"  --first-extremely-long-flag <string>\n" +
+		"    first one\n" +
+		"  -h <LONG_PLACEHOLDER_TO_FORCE_FOLDING_OF_H>\n" +
+		"    user h LONG_PLACEHOLDER_TO_FORCE_FOLDING_OF_H\n" +
+		"  --help <LONG_PLACEHOLDER_TO_FORCE_FOLDING_OF_HELP>\n" +
+		"    user help LONG_PLACEHOLDER_TO_FORCE_FOLDING_OF_HELP\n" +
+		"  --second-extremely-long-flag <int>\n" +
+		"    second one (default 10)\n"
+	if got := outbuf.String(); got != expected {
+		t.Errorf("unexpected output:\ngot:  %q\nwant: %q", got, expected)
+	}
+}
+
+// TestDefaultUsageUnicode confirms width is measured in runes, not bytes:
+// a single-rune multi-byte flag name aligns with a single-byte one.
+func TestDefaultUsageUnicode(t *testing.T) {
+	t.Parallel()
+	outbuf := new(bytes.Buffer)
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.Bool("a", false, "is for apple")
+	ffs.Bool("☺", false, "smiley")
+	yfs := &FlagSet{FlagSet: ffs}
+	ffs.SetOutput(outbuf)
+
+	if err := yfs.Parse([]string{"--help"}); err != flag.ErrHelp {
+		t.Fatalf("Expected ErrHelp, got: %v", err)
+	}
+
+	expected := "Usage: test [OPTIONS] [ARGUMENTS]\n" +
+		"\n" +
+		"Options:\n" +
+		"  -a" + strings.Repeat(" ", 10) + "is for apple\n" +
+		"  -☺" + strings.Repeat(" ", 10) + "smiley\n" +
+		"  -h, --help  show this help and exit\n"
+	if got := outbuf.String(); got != expected {
+		t.Errorf("unexpected output:\ngot:  %q\nwant: %q", got, expected)
+	}
+}
+
+// TestDefaultUsageEmptyDescription confirms a flag with an empty usage string
+// produces a syntax-only row with no trailing whitespace.
+func TestDefaultUsageEmptyDescription(t *testing.T) {
+	t.Parallel()
+	outbuf := new(bytes.Buffer)
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.Bool("x", false, "")
+	yfs := &FlagSet{FlagSet: ffs}
+	ffs.SetOutput(outbuf)
+
+	if err := yfs.Parse([]string{"--help"}); err != flag.ErrHelp {
+		t.Fatalf("Expected ErrHelp, got: %v", err)
+	}
+
+	out := outbuf.String()
+	if !strings.Contains(out, "  -x\n") {
+		t.Errorf("expected empty-description row %q in output, got: %q", "  -x\n", out)
+	}
+	if strings.Contains(out, "  -x ") {
+		t.Errorf("empty-description row should have no trailing whitespace, got: %q", out)
+	}
+}
+
+// TestDefaultUsageNoTabs is a regression guard: yaarp must never emit tab
+// characters in the default usage output.
+func TestDefaultUsageNoTabs(t *testing.T) {
+	t.Parallel()
+	outbuf := new(bytes.Buffer)
+	ffs := flag.NewFlagSet("test", flag.ContinueOnError)
+	ffs.Bool("a", false, "is for apple")
+	ffs.Int("count", 5, "how many")
+	ffs.String("name", "world", "your name")
+	yfs := &FlagSet{FlagSet: ffs}
+	ffs.SetOutput(outbuf)
+
+	if err := yfs.Parse([]string{"--help"}); err != flag.ErrHelp {
+		t.Fatalf("Expected ErrHelp, got: %v", err)
+	}
+	if strings.ContainsRune(outbuf.String(), '\t') {
+		t.Errorf("output should contain no tab characters; got: %q", outbuf.String())
 	}
 }
